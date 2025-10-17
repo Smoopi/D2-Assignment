@@ -39,7 +39,11 @@ button {
   cursor: pointer;
   font-weight: 600;
 }
-button:hover {
+button[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+button:hover:not([disabled]) {
   border-color: #bbb;
   box-shadow: 0 1px 6px rgba(0, 0, 0, 0.06);
 }
