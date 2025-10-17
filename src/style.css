@@ -1,3 +1,7 @@
+:root {
+  --page-max: 720px;
+}
+
 html, body {
   margin: 0;
   padding: 0;
@@ -20,6 +24,26 @@ h1 {
   font-weight: 700;
 }
 
+.controls {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+button {
+  appearance: none;
+  border: 1px solid #ccc;
+  background: #fff;
+  padding: 8px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 600;
+}
+button:hover {
+  border-color: #bbb;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.06);
+}
+
 .workpad {
   display: block;
   width: 256px;
@@ -28,4 +52,5 @@ h1 {
   border: 1px solid #000;
   border-radius: 12px;
   filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.18));
+  cursor: crosshair;
 }
