@@ -21,6 +21,21 @@ thickBtn.id = "tool-thick";
 thickBtn.type = "button";
 thickBtn.textContent = "Thick";
 
+const stickerRow = document.createElement("div");
+stickerRow.className = "controls";
+
+function makeStickerButton(id: string, emoji: string) {
+  const b = document.createElement("button");
+  b.id = id;
+  b.type = "button";
+  b.textContent = emoji;
+  b.className = "stickerBtn";
+  return b;
+}
+const smileBtn = makeStickerButton("sticker-smile", "🙂");
+const rocketBtn = makeStickerButton("sticker-rocket", "🚀");
+const starBtn = makeStickerButton("sticker-star", "⭐");
+
 const undoBtn = document.createElement("button");
 undoBtn.id = "undo-btn";
 undoBtn.type = "button";
@@ -42,7 +57,8 @@ canvas.height = 256;
 canvas.className = "workpad";
 
 toolbar.append(thinBtn, thickBtn, undoBtn, redoBtn, clearBtn);
-app.append(title, toolbar, canvas);
+stickerRow.append(smileBtn, rocketBtn, starBtn);
+app.append(title, toolbar, stickerRow, canvas);
 document.body.appendChild(app);
 
 interface DisplayCommand {
@@ -50,10 +66,6 @@ interface DisplayCommand {
 }
 interface DraggableCommand extends DisplayCommand {
   drag(x: number, y: number): void;
-}
-
-interface PreviewRenderable {
-  draw(ctx: CanvasRenderingContext2D): void;
 }
 
 class MarkerLine implements DraggableCommand {
@@ -73,7 +85,6 @@ class MarkerLine implements DraggableCommand {
 
   display(ctx: CanvasRenderingContext2D) {
     if (this.points.length === 0) return;
-
     ctx.save();
     ctx.lineWidth = this.thickness;
     ctx.strokeStyle = this.color;
@@ -101,6 +112,34 @@ class MarkerLine implements DraggableCommand {
   }
 }
 
+class StickerCommand implements DraggableCommand {
+  constructor(
+    private emoji: string,
+    private x: number,
+    private y: number,
+    private fontSize: number = 24,
+  ) {}
+
+  drag(x: number, y: number) {
+    this.x = x;
+    this.y = y;
+  }
+
+  display(ctx: CanvasRenderingContext2D) {
+    ctx.save();
+    ctx.font =
+      `${this.fontSize}px system-ui, Apple Color Emoji, Segoe UI Emoji, sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(this.emoji, this.x, this.y);
+    ctx.restore();
+  }
+}
+
+interface PreviewRenderable {
+  draw(ctx: CanvasRenderingContext2D): void;
+}
+
 class MarkerPreview implements PreviewRenderable {
   private x = 0;
   private y = 0;
@@ -111,8 +150,8 @@ class MarkerPreview implements PreviewRenderable {
     this.x = x;
     this.y = y;
   }
-  setThickness(th: number) {
-    this.thickness = th;
+  setThickness(t: number) {
+    this.thickness = t;
   }
   setVisible(v: boolean) {
     this.visible = v;
@@ -132,38 +171,128 @@ class MarkerPreview implements PreviewRenderable {
   }
 }
 
+class StickerPreview implements PreviewRenderable {
+  private x = 0;
+  private y = 0;
+  private emoji = "🙂";
+  private fontSize = 24;
+  private visible = false;
+
+  setPosition(x: number, y: number) {
+    this.x = x;
+    this.y = y;
+  }
+  setEmoji(e: string) {
+    this.emoji = e;
+  }
+  setFontSize(px: number) {
+    this.fontSize = px;
+  }
+  setVisible(v: boolean) {
+    this.visible = v;
+  }
+
+  draw(ctx: CanvasRenderingContext2D) {
+    if (!this.visible) return;
+    ctx.save();
+    ctx.globalAlpha = 0.6;
+    ctx.font =
+      `${this.fontSize}px system-ui, Apple Color Emoji, Segoe UI Emoji, sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(this.emoji, this.x, this.y);
+    ctx.restore();
+  }
+}
+
 const DRAWING_CHANGED = "drawing-changed" as const;
 const TOOL_MOVED = "tool-moved" as const;
 
 const drawing: DisplayCommand[] = [];
 const redoStack: DisplayCommand[] = [];
 
-const preview = new MarkerPreview();
+const markerPreview = new MarkerPreview();
+const stickerPreview = new StickerPreview();
+let currentPreview: PreviewRenderable = markerPreview;
 
 const ctx = canvas.getContext("2d")!;
 if (!ctx) throw new Error("Canvas 2D context not available.");
 
-type ToolName = "thin" | "thick";
-const TOOL_STYLES: Record<ToolName, number> = { thin: 2, thick: 6 };
-let activeTool: ToolName = "thin";
+type ToolState =
+  | { kind: "marker"; thickness: number }
+  | { kind: "sticker"; emoji: string; fontSize: number };
+
+const TOOL_STYLES = {
+  markerThin: 2,
+  markerThick: 6,
+  stickerFontSize: 28,
+};
+
+let activeTool: ToolState = {
+  kind: "marker",
+  thickness: TOOL_STYLES.markerThin,
+};
+
+function setActiveMarker(thickness: number) {
+  activeTool = { kind: "marker", thickness };
+  currentPreview = markerPreview;
+  markerPreview.setThickness(thickness);
+  canvas.dispatchEvent(new Event(TOOL_MOVED));
+  updateToolSelectionUI();
+}
+
+function setActiveSticker(
+  emoji: string,
+  fontSize = TOOL_STYLES.stickerFontSize,
+) {
+  activeTool = { kind: "sticker", emoji, fontSize };
+  currentPreview = stickerPreview;
+  stickerPreview.setEmoji(emoji);
+  stickerPreview.setFontSize(fontSize);
+  canvas.dispatchEvent(new Event(TOOL_MOVED));
+  updateToolSelectionUI();
+}
+
+setActiveMarker(TOOL_STYLES.markerThin);
 
 function updateToolSelectionUI() {
-  thinBtn.classList.toggle("selectedTool", activeTool === "thin");
-  thickBtn.classList.toggle("selectedTool", activeTool === "thick");
-  preview.setThickness(TOOL_STYLES[activeTool]);
-}
-updateToolSelectionUI();
+  thinBtn.classList.toggle(
+    "selectedTool",
+    activeTool.kind === "marker" &&
+      activeTool.thickness === TOOL_STYLES.markerThin,
+  );
+  thickBtn.classList.toggle(
+    "selectedTool",
+    activeTool.kind === "marker" &&
+      activeTool.thickness === TOOL_STYLES.markerThick,
+  );
 
-thinBtn.addEventListener("click", () => {
-  activeTool = "thin";
-  updateToolSelectionUI();
-  canvas.dispatchEvent(new Event(TOOL_MOVED));
-});
-thickBtn.addEventListener("click", () => {
-  activeTool = "thick";
-  updateToolSelectionUI();
-  canvas.dispatchEvent(new Event(TOOL_MOVED));
-});
+  if (activeTool.kind === "sticker") {
+    const stickerEmoji = activeTool.emoji;
+    for (const btn of [smileBtn, rocketBtn, starBtn]) {
+      btn.classList.toggle(
+        "selectedTool",
+        (btn.textContent ?? "") === stickerEmoji,
+      );
+    }
+  } else {
+    for (const btn of [smileBtn, rocketBtn, starBtn]) {
+      btn.classList.remove("selectedTool");
+    }
+  }
+}
+
+thinBtn.addEventListener(
+  "click",
+  () => setActiveMarker(TOOL_STYLES.markerThin),
+);
+thickBtn.addEventListener(
+  "click",
+  () => setActiveMarker(TOOL_STYLES.markerThick),
+);
+smileBtn.addEventListener("click", () => setActiveSticker("🙂"));
+rocketBtn.addEventListener("click", () => setActiveSticker("🚀"));
+starBtn.addEventListener("click", () => setActiveSticker("⭐"));
 
 let isDrawing = false;
 let isPointerInCanvas = false;
@@ -182,7 +311,7 @@ function redraw() {
 
   for (const cmd of drawing) cmd.display(ctx);
 
-  preview.draw(ctx);
+  if (!isDrawing) currentPreview.draw(ctx);
 
   undoBtn.disabled = drawing.length === 0 || isDrawing;
   redoBtn.disabled = redoStack.length === 0;
@@ -191,13 +320,20 @@ function redraw() {
 
 function onMouseDown(e: MouseEvent) {
   isDrawing = true;
-  preview.setVisible(false);
 
   const { x, y } = getCanvasPos(e);
   redoStack.length = 0;
 
-  const thickness = TOOL_STYLES[activeTool];
-  drawing.push(new MarkerLine(x, y, thickness));
+  if (activeTool.kind === "marker") {
+    drawing.push(new MarkerLine(x, y, activeTool.thickness));
+  } else {
+    drawing.push(
+      new StickerCommand(activeTool.emoji, x, y, activeTool.fontSize),
+    );
+  }
+
+  if (currentPreview === markerPreview) markerPreview.setVisible(false);
+  if (currentPreview === stickerPreview) stickerPreview.setVisible(false);
 
   dispatchChange();
 }
@@ -209,20 +345,33 @@ function onMouseMove(e: MouseEvent) {
     const current = drawing[drawing.length - 1] as DraggableCommand | undefined;
     current?.drag(x, y);
     dispatchChange();
-  } else {
-    if (isPointerInCanvas) {
-      preview.setThickness(TOOL_STYLES[activeTool]);
-      preview.setPosition(x, y);
-      preview.setVisible(true);
-      canvas.dispatchEvent(new Event(TOOL_MOVED));
+  } else if (isPointerInCanvas) {
+    if (activeTool.kind === "marker") {
+      markerPreview.setPosition(x, y);
+      markerPreview.setThickness(activeTool.thickness);
+      markerPreview.setVisible(true);
+    } else {
+      stickerPreview.setPosition(x, y);
+      stickerPreview.setEmoji(activeTool.emoji);
+      stickerPreview.setFontSize(activeTool.fontSize);
+      stickerPreview.setVisible(true);
     }
+    canvas.dispatchEvent(new Event(TOOL_MOVED));
   }
 }
 
 function onMouseUpOrLeave() {
   if (isDrawing) {
     isDrawing = false;
-    preview.setVisible(isPointerInCanvas);
+    if (isPointerInCanvas) {
+      if (activeTool.kind === "marker") markerPreview.setVisible(true);
+      else stickerPreview.setVisible(true);
+      canvas.dispatchEvent(new Event(TOOL_MOVED));
+    } else {
+      if (activeTool.kind === "marker") markerPreview.setVisible(false);
+      else stickerPreview.setVisible(false);
+      canvas.dispatchEvent(new Event(TOOL_MOVED));
+    }
     dispatchChange();
   }
 }
@@ -230,15 +379,22 @@ function onMouseUpOrLeave() {
 function onMouseEnter() {
   isPointerInCanvas = true;
   if (!isDrawing) {
-    preview.setThickness(TOOL_STYLES[activeTool]);
-    preview.setVisible(true);
+    if (activeTool.kind === "marker") {
+      markerPreview.setThickness(activeTool.thickness);
+      markerPreview.setVisible(true);
+    } else {
+      stickerPreview.setEmoji(activeTool.emoji);
+      stickerPreview.setFontSize(activeTool.fontSize);
+      stickerPreview.setVisible(true);
+    }
     canvas.dispatchEvent(new Event(TOOL_MOVED));
   }
 }
 
 function onMouseLeave() {
   isPointerInCanvas = false;
-  preview.setVisible(false);
+  markerPreview.setVisible(false);
+  stickerPreview.setVisible(false);
   canvas.dispatchEvent(new Event(TOOL_MOVED));
 }
 
@@ -273,5 +429,4 @@ undoBtn.addEventListener("click", undo);
 redoBtn.addEventListener("click", redo);
 clearBtn.addEventListener("click", clearAll);
 
-preview.setVisible(false);
 dispatchChange();

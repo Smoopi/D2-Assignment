@@ -54,6 +54,12 @@ button:hover:not([disabled]) {
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12);
 }
 
+.stickerBtn {
+  min-width: 44px;
+  font-size: 18px;
+  line-height: 1;
+}
+
 .workpad {
   display: block;
   width: 256px;
