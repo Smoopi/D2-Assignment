@@ -8,8 +8,18 @@ app.id = "app";
 const title = document.createElement("h1");
 title.textContent = "D2 - Assignment";
 
-const controls = document.createElement("div");
-controls.className = "controls";
+const toolbar = document.createElement("div");
+toolbar.className = "controls";
+
+const thinBtn = document.createElement("button");
+thinBtn.id = "tool-thin";
+thinBtn.type = "button";
+thinBtn.textContent = "Thin";
+
+const thickBtn = document.createElement("button");
+thickBtn.id = "tool-thick";
+thickBtn.type = "button";
+thickBtn.textContent = "Thick";
 
 const undoBtn = document.createElement("button");
 undoBtn.id = "undo-btn";
@@ -31,22 +41,25 @@ canvas.width = 256;
 canvas.height = 256;
 canvas.className = "workpad";
 
-controls.append(undoBtn, redoBtn, clearBtn);
-app.append(title, controls, canvas);
+toolbar.append(thinBtn, thickBtn, undoBtn, redoBtn, clearBtn);
+app.append(title, toolbar, canvas);
 document.body.appendChild(app);
 
 interface DisplayCommand {
   display(ctx: CanvasRenderingContext2D): void;
 }
-
 interface DraggableCommand extends DisplayCommand {
   drag(x: number, y: number): void;
 }
 
 class MarkerLine implements DraggableCommand {
   private points: { x: number; y: number }[] = [];
-
-  constructor(x: number, y: number) {
+  constructor(
+    x: number,
+    y: number,
+    private thickness: number,
+    private color: string = "#222",
+  ) {
     this.points.push({ x, y });
   }
 
@@ -57,11 +70,19 @@ class MarkerLine implements DraggableCommand {
   display(ctx: CanvasRenderingContext2D) {
     if (this.points.length === 0) return;
 
+    ctx.save();
+    ctx.lineWidth = this.thickness;
+    ctx.strokeStyle = this.color;
+    ctx.fillStyle = this.color;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+
     if (this.points.length === 1) {
       const p = this.points[0];
       ctx.beginPath();
-      ctx.arc(p.x, p.y, ctx.lineWidth / 2, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, this.thickness / 2, 0, Math.PI * 2);
       ctx.fill();
+      ctx.restore();
       return;
     }
 
@@ -72,6 +93,7 @@ class MarkerLine implements DraggableCommand {
       ctx.lineTo(p.x, p.y);
     }
     ctx.stroke();
+    ctx.restore();
   }
 }
 
@@ -82,11 +104,27 @@ const redoStack: DisplayCommand[] = [];
 const ctx = canvas.getContext("2d")!;
 if (!ctx) throw new Error("Canvas 2D context not available.");
 
-ctx.lineWidth = 3;
-ctx.lineCap = "round";
-ctx.lineJoin = "round";
-ctx.strokeStyle = "#222";
-ctx.fillStyle = "#222";
+type ToolName = "thin" | "thick";
+const TOOL_STYLES: Record<ToolName, number> = {
+  thin: 2,
+  thick: 6,
+};
+let activeTool: ToolName = "thin";
+
+function updateToolSelectionUI() {
+  thinBtn.classList.toggle("selectedTool", activeTool === "thin");
+  thickBtn.classList.toggle("selectedTool", activeTool === "thick");
+}
+updateToolSelectionUI();
+
+thinBtn.addEventListener("click", () => {
+  activeTool = "thin";
+  updateToolSelectionUI();
+});
+thickBtn.addEventListener("click", () => {
+  activeTool = "thick";
+  updateToolSelectionUI();
+});
 
 let isDrawing = false;
 
@@ -116,7 +154,9 @@ function onMouseDown(e: MouseEvent) {
   const { x, y } = getCanvasPos(e);
 
   redoStack.length = 0;
-  drawing.push(new MarkerLine(x, y));
+
+  const thickness = TOOL_STYLES[activeTool];
+  drawing.push(new MarkerLine(x, y, thickness));
 
   dispatchChange();
 }
@@ -143,13 +183,11 @@ function undo() {
   redoStack.push(last);
   dispatchChange();
 }
-
 function redo() {
   if (redoStack.length === 0) return;
   drawing.push(redoStack.pop()!);
   dispatchChange();
 }
-
 function clearAll() {
   if (drawing.length === 0 && redoStack.length === 0) return;
   drawing.length = 0;
