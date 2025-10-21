@@ -6,7 +6,7 @@ const app = document.createElement("div");
 app.id = "app";
 
 const title = document.createElement("h1");
-title.textContent = "D2 - Assignment (Step 4)";
+title.textContent = "D2 - Assignment";
 
 const controls = document.createElement("div");
 controls.className = "controls";
@@ -32,19 +32,52 @@ canvas.height = 256;
 canvas.className = "workpad";
 
 controls.append(undoBtn, redoBtn, clearBtn);
-app.appendChild(title);
-app.appendChild(controls);
-app.appendChild(canvas);
+app.append(title, controls, canvas);
 document.body.appendChild(app);
 
-type Point = { x: number; y: number };
-type Stroke = Point[];
-type Drawing = Stroke[];
+interface DisplayCommand {
+  display(ctx: CanvasRenderingContext2D): void;
+}
+
+interface DraggableCommand extends DisplayCommand {
+  drag(x: number, y: number): void;
+}
+
+class MarkerLine implements DraggableCommand {
+  private points: { x: number; y: number }[] = [];
+
+  constructor(x: number, y: number) {
+    this.points.push({ x, y });
+  }
+
+  drag(x: number, y: number) {
+    this.points.push({ x, y });
+  }
+
+  display(ctx: CanvasRenderingContext2D) {
+    if (this.points.length === 0) return;
+
+    if (this.points.length === 1) {
+      const p = this.points[0];
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, ctx.lineWidth / 2, 0, Math.PI * 2);
+      ctx.fill();
+      return;
+    }
+
+    ctx.beginPath();
+    ctx.moveTo(this.points[0].x, this.points[0].y);
+    for (let i = 1; i < this.points.length; i++) {
+      const p = this.points[i];
+      ctx.lineTo(p.x, p.y);
+    }
+    ctx.stroke();
+  }
+}
 
 const DRAWING_CHANGED = "drawing-changed" as const;
-
-const drawing: Drawing = [];
-const redoStack: Drawing = [];
+const drawing: DisplayCommand[] = [];
+const redoStack: DisplayCommand[] = [];
 
 const ctx = canvas.getContext("2d")!;
 if (!ctx) throw new Error("Canvas 2D context not available.");
@@ -57,9 +90,9 @@ ctx.fillStyle = "#222";
 
 let isDrawing = false;
 
-function getCanvasPos(evt: MouseEvent): Point {
-  const rect = canvas.getBoundingClientRect();
-  return { x: evt.clientX - rect.left, y: evt.clientY - rect.top };
+function getCanvasPos(evt: MouseEvent) {
+  const r = canvas.getBoundingClientRect();
+  return { x: evt.clientX - r.left, y: evt.clientY - r.top };
 }
 
 function dispatchChange() {
@@ -69,23 +102,8 @@ function dispatchChange() {
 function redraw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  for (const stroke of drawing) {
-    if (stroke.length === 0) continue;
-
-    if (stroke.length === 1) {
-      const p = stroke[0];
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, ctx.lineWidth / 2, 0, Math.PI * 2);
-      ctx.fill();
-      continue;
-    }
-
-    ctx.beginPath();
-    ctx.moveTo(stroke[0].x, stroke[0].y);
-    for (let i = 1; i < stroke.length; i++) {
-      ctx.lineTo(stroke[i].x, stroke[i].y);
-    }
-    ctx.stroke();
+  for (const cmd of drawing) {
+    cmd.display(ctx);
   }
 
   undoBtn.disabled = drawing.length === 0 || isDrawing;
@@ -95,19 +113,21 @@ function redraw() {
 
 function onMouseDown(e: MouseEvent) {
   isDrawing = true;
-  const p = getCanvasPos(e);
+  const { x, y } = getCanvasPos(e);
 
-  drawing.push([p]);
   redoStack.length = 0;
+  drawing.push(new MarkerLine(x, y));
 
   dispatchChange();
 }
 
 function onMouseMove(e: MouseEvent) {
   if (!isDrawing) return;
-  const p = getCanvasPos(e);
-  const currentStroke = drawing[drawing.length - 1];
-  currentStroke.push(p);
+  const { x, y } = getCanvasPos(e);
+
+  const current = drawing[drawing.length - 1] as DraggableCommand | undefined;
+  current?.drag(x, y);
+
   dispatchChange();
 }
 
@@ -118,9 +138,7 @@ function onMouseUpOrLeave() {
 }
 
 function undo() {
-  if (isDrawing) return;
-  if (drawing.length === 0) return;
-
+  if (isDrawing || drawing.length === 0) return;
   const last = drawing.pop()!;
   redoStack.push(last);
   dispatchChange();
@@ -128,9 +146,7 @@ function undo() {
 
 function redo() {
   if (redoStack.length === 0) return;
-
-  const stroke = redoStack.pop()!;
-  drawing.push(stroke);
+  drawing.push(redoStack.pop()!);
   dispatchChange();
 }
 
