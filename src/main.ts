@@ -52,6 +52,10 @@ interface DraggableCommand extends DisplayCommand {
   drag(x: number, y: number): void;
 }
 
+interface PreviewRenderable {
+  draw(ctx: CanvasRenderingContext2D): void;
+}
+
 class MarkerLine implements DraggableCommand {
   private points: { x: number; y: number }[] = [];
   constructor(
@@ -97,36 +101,72 @@ class MarkerLine implements DraggableCommand {
   }
 }
 
+class MarkerPreview implements PreviewRenderable {
+  private x = 0;
+  private y = 0;
+  private thickness = 2;
+  private visible = false;
+
+  setPosition(x: number, y: number) {
+    this.x = x;
+    this.y = y;
+  }
+  setThickness(th: number) {
+    this.thickness = th;
+  }
+  setVisible(v: boolean) {
+    this.visible = v;
+  }
+
+  draw(ctx: CanvasRenderingContext2D) {
+    if (!this.visible) return;
+    ctx.save();
+    ctx.globalAlpha = 0.6;
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = "#555";
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.thickness / 2, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
 const DRAWING_CHANGED = "drawing-changed" as const;
+const TOOL_MOVED = "tool-moved" as const;
+
 const drawing: DisplayCommand[] = [];
 const redoStack: DisplayCommand[] = [];
+
+const preview = new MarkerPreview();
 
 const ctx = canvas.getContext("2d")!;
 if (!ctx) throw new Error("Canvas 2D context not available.");
 
 type ToolName = "thin" | "thick";
-const TOOL_STYLES: Record<ToolName, number> = {
-  thin: 2,
-  thick: 6,
-};
+const TOOL_STYLES: Record<ToolName, number> = { thin: 2, thick: 6 };
 let activeTool: ToolName = "thin";
 
 function updateToolSelectionUI() {
   thinBtn.classList.toggle("selectedTool", activeTool === "thin");
   thickBtn.classList.toggle("selectedTool", activeTool === "thick");
+  preview.setThickness(TOOL_STYLES[activeTool]);
 }
 updateToolSelectionUI();
 
 thinBtn.addEventListener("click", () => {
   activeTool = "thin";
   updateToolSelectionUI();
+  canvas.dispatchEvent(new Event(TOOL_MOVED));
 });
 thickBtn.addEventListener("click", () => {
   activeTool = "thick";
   updateToolSelectionUI();
+  canvas.dispatchEvent(new Event(TOOL_MOVED));
 });
 
 let isDrawing = false;
+let isPointerInCanvas = false;
 
 function getCanvasPos(evt: MouseEvent) {
   const r = canvas.getBoundingClientRect();
@@ -140,9 +180,9 @@ function dispatchChange() {
 function redraw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  for (const cmd of drawing) {
-    cmd.display(ctx);
-  }
+  for (const cmd of drawing) cmd.display(ctx);
+
+  preview.draw(ctx);
 
   undoBtn.disabled = drawing.length === 0 || isDrawing;
   redoBtn.disabled = redoStack.length === 0;
@@ -151,8 +191,9 @@ function redraw() {
 
 function onMouseDown(e: MouseEvent) {
   isDrawing = true;
-  const { x, y } = getCanvasPos(e);
+  preview.setVisible(false);
 
+  const { x, y } = getCanvasPos(e);
   redoStack.length = 0;
 
   const thickness = TOOL_STYLES[activeTool];
@@ -162,19 +203,43 @@ function onMouseDown(e: MouseEvent) {
 }
 
 function onMouseMove(e: MouseEvent) {
-  if (!isDrawing) return;
   const { x, y } = getCanvasPos(e);
 
-  const current = drawing[drawing.length - 1] as DraggableCommand | undefined;
-  current?.drag(x, y);
-
-  dispatchChange();
+  if (isDrawing) {
+    const current = drawing[drawing.length - 1] as DraggableCommand | undefined;
+    current?.drag(x, y);
+    dispatchChange();
+  } else {
+    if (isPointerInCanvas) {
+      preview.setThickness(TOOL_STYLES[activeTool]);
+      preview.setPosition(x, y);
+      preview.setVisible(true);
+      canvas.dispatchEvent(new Event(TOOL_MOVED));
+    }
+  }
 }
 
 function onMouseUpOrLeave() {
-  if (!isDrawing) return;
-  isDrawing = false;
-  dispatchChange();
+  if (isDrawing) {
+    isDrawing = false;
+    preview.setVisible(isPointerInCanvas);
+    dispatchChange();
+  }
+}
+
+function onMouseEnter() {
+  isPointerInCanvas = true;
+  if (!isDrawing) {
+    preview.setThickness(TOOL_STYLES[activeTool]);
+    preview.setVisible(true);
+    canvas.dispatchEvent(new Event(TOOL_MOVED));
+  }
+}
+
+function onMouseLeave() {
+  isPointerInCanvas = false;
+  preview.setVisible(false);
+  canvas.dispatchEvent(new Event(TOOL_MOVED));
 }
 
 function undo() {
@@ -198,12 +263,15 @@ function clearAll() {
 canvas.addEventListener("mousedown", onMouseDown);
 canvas.addEventListener("mousemove", onMouseMove);
 canvas.addEventListener("mouseup", onMouseUpOrLeave);
-canvas.addEventListener("mouseleave", onMouseUpOrLeave);
+canvas.addEventListener("mouseenter", onMouseEnter);
+canvas.addEventListener("mouseleave", onMouseLeave);
 
 canvas.addEventListener(DRAWING_CHANGED, redraw);
+canvas.addEventListener(TOOL_MOVED, redraw);
 
 undoBtn.addEventListener("click", undo);
 redoBtn.addEventListener("click", redo);
 clearBtn.addEventListener("click", clearAll);
 
+preview.setVisible(false);
 dispatchChange();
